@@ -26,6 +26,7 @@ ABT automatically defends a network against autonomous pen-testing agents (Incal
 | 4 | Network-wide attack graph from topology, services, vulns, deployed controls | `abt/harm.py` (2-layer HARM: host graph + per-host noisy-OR attack trees) |
 | 5 | Attacker goal (Incalmo-style) captured in graph | `AttackGoal`; `attack_paths(net, goal)` |
 | 6 | Master agent: plan, simulate, evaluate, recommend | `abt/master.py`, `abt/simulator.py` |
+| — | Import MHBench-generated / APT-Agent topology JSON into the `Network` model | `abt/importers.py` (`load_mhbench`, `load_apt_agent_topology`, `load_network`) |
 
 ## 2. Evaluation model
 
