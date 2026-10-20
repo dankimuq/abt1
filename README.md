@@ -41,7 +41,48 @@ For a defence plan *A* applied to a **simulated copy** of the network:
 
 Planner: greedy marginal-utility selection (anytime, polynomial). Alternatives for the paper: beam search, ILP/MCTS, RL; compare against optimal on small networks.
 
-## 3. Attack-and-defence training loop
+## 3. SDN-aware network defense simulation
+
+MTD does not inherently depend on SDN: address changes can be coordinated through
+host firewalls, DHCP/DNS, VM/container networking, or NAT. ABT keeps MTD as a
+separate defense family. For repeatable network-level policy experiments, the model
+also supports an optional **simulated** `SDNController` with virtual-IP leases and
+flow-block rules; it is not connected to a live SDN product. This SDN control-plane
+emulation is the selected experimental assumption because it makes policy changes
+and endpoint remapping explicit and measurable.
+
+`MasterAgent.plan()` evaluates candidate actions on cloned networks first. A `Plan`
+contains baseline and predicted security risk, legitimate-flow availability,
+performance, cost, and SDN policy/address changes. `MasterAgent.execute(plan)`
+applies a feasible plan to the in-memory model only. The `TrainingLoop` can apply a
+proactive initial plan before the first simulated attack:
+
+```python
+from abt.loop import TrainingLoop
+from abt.master import MasterAgent
+from abt.model import SDNController
+from abt.red import APTAgentAdapter
+from examples.enterprise import build
+
+net, goals = build()
+net.sdn_controller = SDNController(
+    virtual_ips={host: f"192.0.2.{index}" for index, host in enumerate(net.hosts, 10)},
+    address_pool=[f"192.0.2.{index}" for index in range(100, 120)],
+)
+result = TrainingLoop(
+    MasterAgent(net, goals), APTAgentAdapter(goals),
+    proactive_actions=3, detect_p=0.6, seed=1,
+).run(rounds=20)
+print(result.initial_plan.after, result.success_rate)
+```
+
+This is control-plane emulation for isolated experiments. It does not program a
+switch, firewall, or cloud security group. A future deployment adapter needs
+dry-run, approval, state read-back, health checks, and rollback. See
+[the network-defense design](slides/network-defense-design.md) for the bounded
+proactive/reactive portfolio and deployment scope.
+
+## 4. Attack-and-defence training loop
 
 `abt.loop.TrainingLoop` runs repeated rounds against a `RedTeamAdapter`. Each round
 records the attacker result and path, samples MIR detections for traversed hosts
@@ -62,15 +103,28 @@ result = TrainingLoop(
 print(result.success_rate, result.converged)
 ```
 
-## 4. Mapping asset → defence (kill-chain, per the MTD-in-depth paper)
+## 5. Mapping asset → defence (kill-chain, per the MTD-in-depth paper)
 
 Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver, exploit, install, c2, objective). Current tags: IP shuffle→recon, diversity→weaponize, patch/MIR/disable→exploit, flow blocking/isolation→c2. **Please verify and refine this table against the paper's actual technique taxonomy**, then extend the catalogue (e.g., credential rotation, decoys, data encryption for the objective phase), and let the master prefer plans covering multiple phases for crown-jewel assets.
 
-## 5. Red-team integration
+## 6. Red-team integration
 
 `abt/red.py` defines `RedTeamAdapter`. The shipped adapters (Incalmo, APT-Agent, AutoHacker) are Monte-Carlo stand-ins with different persistence levels, so the pipeline is testable without a live range. For the paper, replace them with real runs in a testbed (e.g., Incalmo's range environment): translate each tool's goal into `AttackGoal` and its observed behaviour into MIR events.
 
-## 6. Suggested paper structure
+## 7. Network-level defense roadmap (non-MTD)
+
+Beyond MTD, the most direct next control is least-privilege segmentation using the
+existing permitted-flow model. Egress filtering, DNS policy, network detections,
+and graduated quarantine are follow-on controls; they require explicit external
+destinations, DNS/telemetry state, and less coarse isolation semantics. ZTNA and
+rate limiting need identity/context and traffic/QoS models that ABT does not yet
+have. These are research/design proposals, not implemented controls.
+
+See [the network-defense design](slides/network-defense-design.md) for the
+source-grounded survey, model gaps, phased implementation sequence, and validation
+metrics.
+
+## 8. Suggested paper structure
 
 1. Introduction – LLM-driven attackers (Incalmo, APT-Agent) outpace manual defence.
 2. Background – HARM (HARMer), security models/metrics (Enoch 2021), MTD-in-depth.
@@ -79,7 +133,7 @@ Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver
 5. Evaluation – RQ1: reduction in goal success vs. each attacker; RQ2: legit-user availability/performance cost; RQ3: planner optimality/scalability (hosts 10–1000); RQ4: reaction time to MIR alerts; ablations (host-only vs. network-only vs. both; with/without simulation).
 6. Discussion – model fidelity, adaptive attackers, false positives, safety of autonomous response (human approval gate).
 
-## 7. Known limitations / next steps
+## 9. Known limitations / next steps
 
 - Probabilities (MIR block 0.6, diversity 0.7, shuffle 0.6) are placeholders; calibrate with testbed data.
 - Paths assume independence (noisy-OR over paths overestimates correlated paths).
@@ -87,9 +141,23 @@ Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver
 - Network controller is a model mutation; add backends (iptables/SDN/cloud security groups).
 - Attacker adaptation (re-planning after defence changes) is only approximated via `persistence`.
 
-## 8. Run
+## 10. Run
 
 ```
 python3 examples/run_demo.py
 python3 -c 'import runpy; files=["tests/test_abt.py", "tests/test_importers.py", "tests/test_loop.py"]; [fn() for path in files for name, fn in runpy.run_path(path).items() if name.startswith("test_") and callable(fn)]'
 ```
+
+## 11. Paper source
+
+The single canonical manuscript is [`paper/main.tex`](paper/main.tex), with
+references in [`paper/refs.bib`](paper/refs.bib), the editable workflow figure in
+[`paper/abt_framework.svg`](paper/abt_framework.svg), and the compiled output at
+[`paper/main.pdf`](paper/main.pdf). Build it from the repository root with:
+
+```bash
+tectonic --outdir paper paper/main.tex
+```
+
+The Prism-imported manuscript has been merged into this source and its duplicate
+project folder/archive removed. Do not maintain a second manuscript copy.

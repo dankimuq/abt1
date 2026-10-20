@@ -26,6 +26,8 @@ class Evaluation:
     cost: float
     utility: float
     violations: List[str] = field(default_factory=list)
+    sdn_policy_updates: int = 0
+    sdn_address_changes: int = 0
 
     @property
     def feasible(self) -> bool:
@@ -69,6 +71,16 @@ def evaluate(net: Network, goals: List[AttackGoal], actions: Sequence[Action], w
     avail = sum(availability(sim, a.host) * a.value for a in net.assets) / (sum(a.value for a in net.assets) or 1.0)
     r = risk(sim, goals)
     cost = sum(a.cost for a in actions)
+    policy_updates = 0
+    address_changes = 0
+    if sim.sdn_controller is not None:
+        original_updates = net.sdn_controller.policy_updates if net.sdn_controller else 0
+        policy_updates = sim.sdn_controller.policy_updates - original_updates
+        if net.sdn_controller is not None:
+            address_changes = sum(
+                sim.sdn_controller.virtual_ips.get(host) != address
+                for host, address in net.sdn_controller.virtual_ips.items()
+            )
 
     violations = []
     for a in net.assets:
@@ -81,4 +93,8 @@ def evaluate(net: Network, goals: List[AttackGoal], actions: Sequence[Action], w
 
     u = (w.security * (1 - r) + w.availability * avail + w.performance * perf
          - w.cost * min(1.0, cost / w.budget))
-    return Evaluation(r, avail, perf, cost, u, violations)
+    return Evaluation(
+        r, avail, perf, cost, u, violations,
+        sdn_policy_updates=policy_updates,
+        sdn_address_changes=address_changes,
+    )

@@ -52,7 +52,7 @@
 | `examples/enterprise.py`, `examples/run_demo.py` | 5-호스트 예제망, 데모 실행 스크립트 | 검증용 |
 | `tests/test_abt.py` | 공격경로 존재, 가용성 제약 위반 검출, 플랜이 리스크를 낮추는지, 경보 반영 테스트 | 검증용 |
 | `README.md` | 아키텍처, 평가모델, kill-chain 매핑, 논문 구조 제안, 한계점 | 문서화 |
-| `abt_framework.svg` | Red team / Target network / Blue team(ABT) 3-구역, 좌→우 1~7단계 번호가 매겨진 파이프라인 다이어그램 | 그림 |
+| `paper/abt_framework.svg` | Prism 최신 일반화 폐쇄루프 절차도(공격·네트워크·방어 단계, 다구역 토폴로지) | 논문 그림 원본 |
 | `paper/main.tex`, `paper/refs.bib` | IEEEtran 논문 초안(6단계 수식, Algorithm 1, 평가계획 RQ1–RQ4) | 논문화 |
 | `abt/importers.py` | **신규.** MHBench 생성 JSON(`load_mhbench`), APT-Agent 토폴로지 JSON(`load_apt_agent_topology`), 자동판별 `load_network` | 2단계(MHBench 등 기존 네트워크 구성 통합) |
 
@@ -68,11 +68,19 @@
     - **MHBench**: subnet→host 전개, host별 취약점 "플레이북"을 포트가 할당된 `Service/Vuln`으로 합성, subnet 연결→호스트 단위 flow 전개, `from_host_ip`가 비어있고 외부망 호스트면 attacker 진입점으로 간주, `privilege_escalation` 플레이북이 있는 호스트는 해당 호스트로 들어오는 lateral-movement 취약점의 권한을 root로 격상(자기 루프 없이 "거점 확보 후 로컬 권한상승" 근사), `data_exfiltration`/`host_access` 목표를 `AttackGoal`+`Asset`으로 변환.
     - **APT-Agent 토폴로지**: host/edge(JSON) 그대로 `Host/Service/Vuln`+flow로 매핑, `src=="attacker"`인 edge의 목적지를 entry point로, CVSS/10을 공격성공확률 p로 사용(검증 필요, `\todo` 표시됨), 단일 goal host를 `AttackGoal`로 변환.
     - `load_network(path)`: 최상위 키(`hosts`+`edges` vs `networks`)로 스키마 자동 판별.
-  - **검증**: 실제 두 저장소 파일을 복사하지 않고, 동일 스키마의 축소 합성 JSON(2~3 호스트)을 직접 만들어 `load_mhbench`/`load_apt_agent_topology`/`load_network`를 호출 → 호스트·진입점·flow·`attack_paths`/`goal_probability`가 기대대로 계산됨을 확인(세션 로그 기준, 아직 `tests/`에 정식 테스트로 추가되지 않음).
+  - **검증**: 저장소의 `tests/test_importers.py`에서 동일 스키마의 축소 합성 JSON을 이용해 `load_mhbench`/`load_apt_agent_topology`/`load_network`를 검증.
 - **③ 공격-학습 루프 — 기본 구현 완료.**
   - `RedTeamAdapter.run()`은 경로와 목표를 포함한 `AttackResult`를 반환하며, 결과의 truthiness와 `TrainingLoop`의 bool 정규화로 이전 호출 패턴을 유지.
   - `MasterAgent.observe()`는 공격 성공 경로의 중간 호스트를 독립 확률로 탐지해 compromise 이벤트로 반영하고, 목표 호스트는 탐지 대상에서 제외.
   - `abt/loop.py`의 `TrainingLoop`는 공격 → 관측 → 재계획/실행을 반복하며 라운드별 평가, 누적 공격 성공률을 기록하고 방어 상태가 안정되면 조기 종료.
   - `tests/test_importers.py`와 `tests/test_loop.py`에서 가져오기 및 반복 루프를 테스트함. CLI는 아직 구현하지 않음.
+- **DSN 2027 발표 자료 — 연구 진행 중 초안 작성.**
+  - `slides/ABT_DSN_2027.pptx`: 영어 16:9. 방어 포트폴리오를 proactive/reactive × host/network로 나누고, MTD는 별도 비교군으로 유지. SDN 여부와 무관하게 MTD 가능하며, 연구 실험에서는 네트워크 정책/주소 재매핑을 계측하기 위해 SDN 에뮬레이터를 선택.
+  - `slides/network-defense-design.md`: NIST/CISA/MITRE/플랫폼 문서를 바탕으로 기법별 모델링·시뮬레이션 가능성, Mininet/OVS 기반 Linux SDN 검증 경로(Docker는 endpoint 실행에 선택 사용), 초기 선택 subset, 후순위 후보를 정리.
+  - `paper/main.tex` §III와 `paper/refs.bib`에 선택 기준, 배포 경계, 호스트/네트워크 방어 타이밍, MTD 유지 및 모드별 ablation을 기술. 실제 컨트롤/장비 연동 완료로 표현하지 않음.
+  - `TrainingLoop`에 선택적 `proactive_actions` 초기 계획을 추가해 첫 공격 전 적용하는 조건을 테스트 가능하게 함. 기존 기본 동작은 변경하지 않음.
+  - `SDNController` 시뮬레이션 상태(virtual IP lease, blocked-flow rule, policy update count), SDN endpoint shuffle 및 정책 업데이트 계측 구현. 실제 SDN switch/controller adapter는 미구현.
+  - `slides/build_deck.py`가 원본이며, `slides/README.md`의 방법으로 PPTX를 재생성하고 관리.
+  - 발표 자료는 시뮬레이터 데모 결과와 미실시 벤치마크/실환경 실험을 구분함. 작성자 정보, 서지 세부사항, DSN 2027 제출/발표 상태는 확정 전.
 
 > 주의: 두 저장소(JSON 파일) 자체를 리포지토리에 복사하지 않고, **스키마와 로직만 참고해서 우리 코드로 새로 작성**했습니다. 테스트용 픽스처도 실제 저장소 파일을 복사하지 않고 동일 스키마의 축소판을 직접 작성합니다.

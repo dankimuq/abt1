@@ -49,17 +49,29 @@ def diversify(h: str) -> Action:
 
 
 def shuffle_ip(h: str) -> Action:
-    def f(n): n.hosts[h].ip_shuffled = True
+    def f(n):
+        if n.sdn_controller is not None:
+            n.sdn_controller.shuffle_host(h)
+        n.hosts[h].ip_shuffled = True
     return Action(f"mtd:shuffle@{h}", "network", "recon", 1.5, 0.02, h, f)
 
 
 def block_flow(s: str, d: str, port: int) -> Action:
-    def f(n): n.flows.discard((s, d, port))
+    def f(n):
+        flow = (s, d, port)
+        if n.sdn_controller is not None:
+            n.sdn_controller.block_flow(flow)
+        n.flows.discard(flow)
     return Action(f"net:block@{s}->{d}:{port}", "network", "c2", 0.5, 0.0, "", f)
 
 
 def isolate_host(h: str) -> Action:
-    def f(n): n.flows = {x for x in n.flows if h not in (x[0], x[1])}
+    def f(n):
+        blocked = {flow for flow in n.flows if h in (flow[0], flow[1])}
+        if n.sdn_controller is not None:
+            for flow in blocked:
+                n.sdn_controller.block_flow(flow)
+        n.flows.difference_update(blocked)
     return Action(f"mir:isolate@{h}", "host", "c2", 1.0, 0.0, h, f)
 
 
@@ -70,7 +82,9 @@ def candidate_actions(net: Network) -> List[Action]:
             acts.append(install_mir(h))
         if not host.diversified:
             acts.append(diversify(h))
-        if not host.ip_shuffled:
+        if not host.ip_shuffled and (
+            net.sdn_controller is None or net.sdn_controller.can_shuffle(h)
+        ):
             acts.append(shuffle_ip(h))
         for port, svc in host.services.items():
             if svc.enabled:

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 from .master import MasterAgent, Plan
 from .model import Network
@@ -32,6 +32,7 @@ class TrainingRound:
 class TrainingResult:
     rounds: List[TrainingRound]
     converged: bool
+    initial_plan: Optional[Plan] = None
 
     @property
     def success_rate(self) -> float:
@@ -49,17 +50,21 @@ class TrainingLoop:
         max_actions: int = 10,
         seed: int = 1,
         convergence_patience: int = 2,
+        proactive_actions: int = 0,
     ):
         if not 0.0 <= detect_p <= 1.0:
             raise ValueError("detect_p must be between 0 and 1")
         if max_actions < 0:
             raise ValueError("max_actions must be non-negative")
+        if proactive_actions < 0:
+            raise ValueError("proactive_actions must be non-negative")
         if convergence_patience < 1:
             raise ValueError("convergence_patience must be positive")
         self.master = master
         self.attacker = attacker
         self.detect_p = detect_p
         self.max_actions = max_actions
+        self.proactive_actions = proactive_actions
         self.rng = random.Random(seed)
         self.convergence_patience = convergence_patience
 
@@ -75,6 +80,11 @@ class TrainingLoop:
         stable_rounds = 0
         successes = 0
         converged = False
+        initial_plan = None
+        if self.proactive_actions:
+            initial_plan = self.master.plan(self.proactive_actions)
+            self.master.execute(initial_plan)
+
         for number in range(1, rounds + 1):
             attack = self.attacker.run(self.net, self.rng)
             if isinstance(attack, bool):
@@ -105,4 +115,4 @@ class TrainingLoop:
                 converged = True
                 break
 
-        return TrainingResult(history, converged)
+        return TrainingResult(history, converged, initial_plan)

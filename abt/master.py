@@ -81,6 +81,8 @@ class MasterAgent:
         return Plan(chosen, before, cur)
 
     def execute(self, plan: Plan) -> None:
-        """Push approved actions to MIR agents / network controller (here: mutate the model)."""
+        """Apply a feasible plan to the in-memory model; no live controller is invoked."""
+        if not plan.after.feasible:
+            raise ValueError("cannot execute an infeasible defence plan")
         for a in plan.actions:
             a.apply(self.net)

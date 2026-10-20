@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import copy
+import ipaddress
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 PRIV = {"none": 0, "user": 1, "root": 2}
 Flow = Tuple[str, str, int]  # (src, dst, port)
@@ -69,6 +70,47 @@ class AttackGoal:
 
 
 @dataclass
+class SDNController:
+    """Simulated SDN control-plane state; this is not a live controller adapter."""
+    virtual_ips: Dict[str, str]
+    address_pool: List[str]
+    blocked_flows: Set[Flow] = field(default_factory=set)
+    policy_updates: int = 0
+
+    def __post_init__(self) -> None:
+        if len(set(self.virtual_ips.values())) != len(self.virtual_ips):
+            raise ValueError("SDN virtual IP assignments must be unique")
+        if len(set(self.address_pool)) != len(self.address_pool):
+            raise ValueError("SDN address pool entries must be unique")
+        for address in set(self.virtual_ips.values()) | set(self.address_pool):
+            ipaddress.ip_address(address)
+
+    def can_shuffle(self, host: str) -> bool:
+        current = self.virtual_ips.get(host)
+        if current is None:
+            return False
+        in_use = set(self.virtual_ips.values())
+        return any(address != current and address not in in_use for address in self.address_pool)
+
+    def shuffle_host(self, host: str) -> str:
+        current = self.virtual_ips.get(host)
+        if current is None:
+            raise ValueError(f"SDN controller has no virtual IP for host: {host}")
+        in_use = set(self.virtual_ips.values())
+        for address in self.address_pool:
+            if address != current and address not in in_use:
+                self.virtual_ips[host] = address
+                self.policy_updates += 1
+                return address
+        raise ValueError(f"SDN address pool has no free address for host: {host}")
+
+    def block_flow(self, flow: Flow) -> None:
+        if flow not in self.blocked_flows:
+            self.blocked_flows.add(flow)
+            self.policy_updates += 1
+
+
+@dataclass
 class Network:
     hosts: Dict[str, Host]
     flows: Set[Flow]                   # currently permitted connectivity
@@ -76,6 +118,7 @@ class Network:
     legit_flows: List[LegitFlow]
     entry_points: List[str]            # hosts reachable from outside
     compromised: Set[str] = field(default_factory=set)  # learned from MIR alerts
+    sdn_controller: Optional[SDNController] = None
 
     def clone(self) -> "Network":
         return copy.deepcopy(self)

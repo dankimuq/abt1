@@ -1,6 +1,6 @@
 %% ABT: Automated Blue Teaming -- paper draft
-%% Compile with: pdflatex main.tex && bibtex main && pdflatex main.tex && pdflatex main.tex
-%% Requires IEEEtran.cls (bundled with most TeX distributions / Overleaf).
+%% Canonical manuscript source: paper/main.tex
+%% Build from the repository root with: tectonic --outdir paper paper/main.tex
 \documentclass[conference]{IEEEtran}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
@@ -37,14 +37,12 @@ attacker's goal (e.g., data exfiltration, privilege escalation) on this attack g
 following Incalmo's goal abstraction; and (6) uses a master agent that plans
 candidate defence actions, \emph{simulates} their effect on a copy of the network,
 evaluates security, availability, performance and cost, and recommends the
-highest-utility, constraint-feasible action set. We further describe how ABT ingests
-network specifications produced by multi-host benchmark generators such as MHBench,
-and how it closes the loop with red-team execution: each attack attempt is observed,
-partially detected by MIR agents, and used to trigger re-planning, so that the
-defence adapts over successive rounds. We report a worked example on a synthetic
-five-host enterprise network and outline the evaluation protocol for the
-full study. \todo{update abstract numbers once the MHBench/APT-Agent importer and the
-multi-round learning-loop experiments are finalised.}
+highest-utility, constraint-feasible action set. We further describe how ABT ingests network specifications produced by multi-host
+benchmark generators such as MHBench, and outline an iterative red-team/blue-team
+procedure. The reference prototype evaluates plans on cloned network models and
+measures simulated risk, service impact, cost, and SDN-policy changes; it does not
+control live hosts or switches. We report a worked example on a synthetic five-host
+network and specify a testbed evaluation plan.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -85,20 +83,18 @@ environments.
 \textbf{Contributions.}
 \begin{itemize}
 \item A six-component ABT architecture (\S\ref{sec:framework}) that extends
-  two-layer HARM attack graphs with an explicit attacker-goal node, a catalogued,
-  kill-chain-indexed set of host- and network-level defence actions, and a
-  simulate-then-recommend planning loop with hard availability/performance
-  constraints.
+  two-layer HARM attack graphs with an explicit attacker-goal node, a proactive and
+  reactive host/network action catalogue that retains MTD, and a simulate-then-
+  recommend loop with hard availability/performance constraints. An optional SDN
+  control-plane emulator makes flow-rule and virtual-endpoint changes measurable.
 \item A formal utility model (\S\ref{sec:utility}) combining security risk,
   legitimate-user availability, asset performance and deployment cost, used by a
   greedy marginal-utility planner.
-\item A network-import layer (\S\ref{sec:integration}) that maps the schemas used by
-  MHBench-generated environments and by APT-Agent's topology specification into the
-  common ABT network model, so the same defence pipeline can be evaluated against
-  environments built for either tool without re-authoring the target network.
-\item An attack-execution learning loop (\S\ref{sec:loop}) in which repeated
-  red-team attempts are partially observed by MIR agents and drive re-planning,
-  allowing us to measure how quickly ABT converges to a low-risk configuration.
+\item A network importer (\S\ref{sec:integration}) for MHBench and APT-Agent schemas
+  that maps both topologies into the common ABT model.
+\item A repeated attack-observation loop (\S\ref{sec:loop}) that uses partial
+  detections to trigger reactive re-planning and supports an optional proactive
+  initial plan.
 \item A reference, runnable implementation and a worked example on a synthetic
   five-host enterprise network (\S\ref{sec:case-study}).
 \end{itemize}
@@ -152,20 +148,30 @@ constraints on legitimate-user availability and performance, and a cost budget.
 \section{The ABT Framework}
 \label{sec:framework}
 
-\begin{figure}[t]
+\begin{figure*}[t]
   \centering
-  \includegraphics[width=\columnwidth]{abt_framework.pdf}
-  \caption{ABT architecture. The red team (top) attacks the target network (middle);
-  the blue team (bottom) runs the six-step ABT pipeline left to right and closes the
-  loop by deploying actions through MIR agents and the network controller and
-  re-planning on new telemetry. \todo{export \texttt{abt\_framework.svg} to
-  \texttt{abt\_framework.pdf} before compiling, e.g. with Inkscape:
-  \texttt{inkscape abt\_framework.svg --export-type=pdf}.}}
+  \includegraphics[width=0.96\textwidth]{abt_framework.pdf}
+  \caption{General closed-loop automated blue-teaming procedure. The autonomous
+  red team performs reconnaissance, planning, execution, and goal pursuit against
+  an interconnected network. The blue team defines requirements, observes network
+  state, models threats and goals, plans candidate controls, simulates and evaluates
+  their effects, and applies approved actions. Telemetry and measured outcomes feed
+  the next iteration. Zones are illustrative; the workflow is independent of a
+  specific attack tool, topology, or deployment adapter. The figure describes the
+  intended procedure; the current prototype simulates actions and does not actuate
+  live hosts or network devices.}
   \label{fig:architecture}
-\end{figure}
+\end{figure*}
 
-Figure~\ref{fig:architecture} shows the overall architecture, consisting of a red
-team, a target network, and the six-step ABT pipeline, which we now describe in turn.
+Figure~\ref{fig:architecture} presents a tool-independent operational workflow.
+Its six stages organise ABT's components into an iterative
+observe--model--plan--evaluate--respond cycle. Host and network observations inform
+the attack-graph and goal models; the planner evaluates candidate actions on a model
+copy; and outcomes feed later planning. The target may contain any number of
+interconnected zones, hosts, services, and protected assets rather than a fixed
+topology. The figure is a conceptual workflow, not a claim that live sensors or
+enforcement adapters are implemented. The following subsections give the model,
+planner, and prototype details.
 
 \subsection{Step 1 --- Asset and Protection-Requirement Model}
 \label{sec:assets}
@@ -203,6 +209,69 @@ A network controller enforces the topology: which flows $(\mathit{src},
 entry point, and which hosts belong to which network segment. It also executes
 network-level MTD actions, notably IP/port shuffling, which the planner may select
 independently of host-level MIR actions.
+
+MTD does not inherently require SDN: address or port changes can also be coordinated
+through host firewalls, DHCP/DNS, virtual-machine or container networking, and
+network-address translation. These alternatives need their own coordination and
+deployment mechanisms. For the initial network-control study, we use an explicitly
+simulated SDN control plane to make flow-rule updates and virtual-endpoint remapping
+observable and repeatable. ABT's \texttt{SDNController} model stores virtual-IP leases,
+blocked flows, and policy-update counts; candidate rules and shuffles are applied to
+a cloned network for preview, and only the selected plan mutates the in-memory
+network. This is an SDN control-plane emulation, not integration with a live
+controller. The same planner remains applicable without SDN when supplied with a
+different network-controller adapter.
+
+\textbf{Non-MTD network controls.} Enterprise network guidance treats segmentation,
+firewall policy, monitoring, and resource-level access control as complementary
+controls rather than relying on a single perimeter~\cite{nist800215,nist80041r1}.
+ABT's current network model directly represents permitted host-to-host flows; its
+implemented network actions are flow blocking and coarse host isolation. Candidate
+extensions include least-privilege segmentation, directional egress filtering,
+protective DNS, network traffic analysis, and graduated quarantine. Their
+operational mechanisms and deployment prerequisites differ, so this paper selects a
+small implementable subset rather than assuming that every control can be represented
+by deleting a graph edge.
+
+\textbf{Host controls.} Host-level candidates include vulnerability patching,
+disabling an unnecessary service, host-firewall policy, application execution
+controls, credential hardening, and endpoint isolation. The current prototype
+simulates patching, disabling a service, MIR deployment, and host isolation; it does
+not invoke package managers, service managers, endpoint agents, or host-firewall
+APIs. NIST's control catalogue includes system monitoring, malicious-code
+protection, and flaw remediation as distinct control functions~\cite{nist80053}.
+Their actuator and operational risk are also distinct: patching needs a
+platform/package mapping and compatibility checks; disabling a service can interrupt
+a legitimate dependency; host isolation can sever management and recovery access.
+We therefore distinguish simulator support from deployable integration.
+
+\textbf{Proactive and reactive controls.} We call a control \emph{proactive} when it
+is installed or planned before an attack alert, and \emph{reactive} when an observed
+event triggers a response. This is an operational distinction, not an intrinsic
+property of the technique: for example, an ACL may be a proactive baseline or a
+reactive containment rule, and MTD may be scheduled proactively or triggered by
+telemetry. We retain the existing MTD actions (software diversity and IP/port
+shuffling) as a separate control family and baseline; they are not replaced by the
+non-MTD portfolio. The proposed portfolio and feasibility assessment are in
+\S\ref{sec:portfolio}.
+
+\textbf{Deferred network controls.} Protective DNS can block, redirect/sinkhole, and
+alert on matching queries~\cite{cisapdns,d3fenddns}, but ABT first needs domain-query
+state and a model for direct-IP connections. Network traffic analysis is
+observational evidence, not itself inline blocking~\cite{d3fendnta}; live sensors,
+false-positive rates, and alert delays would need to be integrated. ZTNA requires
+identity/device context and policy-enforcement points absent from the current
+flow-only model~\cite{nist800207,cisaztmm}. Rate limiting requires traffic demand,
+link capacity, latency, and throughput state. We defer these controls from the
+initial implementation and deployment subset.
+
+Zero-trust network access is a longer-term extension rather than a flow-only
+action: per-request access decisions require identity, device/context attributes,
+and policy-enforcement points that the present ABT model does not
+represent~\cite{nist800207,cisaztmm}. Similarly, rate limiting requires traffic
+demand, link capacity, latency, and throughput state, which are absent from the
+current binary connectivity model. We therefore defer both until those state
+variables and their operational costs can be evaluated.
 
 \subsection{Step 4 --- Network-Wide Attack Graph (Two-Layer HARM)}
 \label{sec:harm}
@@ -269,28 +338,111 @@ perturbed by an infeasible or low-value trial.
 \subsection{Defence Action Catalogue}
 \label{sec:actions}
 
-Table~\ref{tab:actions} lists the current action catalogue, each tagged with the
-kill-chain phase~\cite{mtdindepth2026} it targets, its deployment cost, and its
-performance overhead on the target host.
+Table~\ref{tab:actions} retains the existing MTD and conventional host/network
+actions. The proactive/reactive classification describes their intended trigger in
+the proposed experiment; it does not assert that live deployment adapters exist.
 
 \begin{table}[t]
 \centering
-\caption{Defence action catalogue (current implementation).}
+\small
+\setlength{\tabcolsep}{2pt}
+\caption{Existing simulated action catalogue, retained MTD controls, and intended
+operational timing. Live actuation is not implemented.}
 \label{tab:actions}
-\begin{tabular}{@{}lll@{}}
+\begin{tabular}{@{}p{0.26\columnwidth}p{0.13\columnwidth}p{0.17\columnwidth}p{0.28\columnwidth}@{}}
 \toprule
-Action & Level & Kill-chain phase \\
+Action & Level & Timing & Implementation status \\
 \midrule
-Install MIR agent & host & exploit \\
-Patch vulnerability & host & exploit \\
-Disable service & host & exploit \\
-Isolate host & host & command \& control \\
-Software diversification & host (MTD) & weaponize \\
-IP/port shuffling & network (MTD) & recon \\
-Block flow & network & command \& control \\
+MIR telemetry / response & host & Both & Simulated event ingestion; no real sensor/agent \\
+Patch vulnerability & host & Proactive & Removes modeled CVE; no package backend \\
+Disable service & host & Proactive & Simulated service state; no service-manager backend \\
+Isolate host & host & Reactive & Coarse flow removal; no recovery-channel semantics \\
+Software diversification (MTD) & host & Proactive* & Existing simulated MTD action \\
+IP/port shuffling (MTD) & network & Proactive* & Existing simulated MTD action \\
+Segmentation / flow block & network & Proactive / reactive & Flow / SDN-state mutation simulated; live controller adapter absent \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+\noindent *MTD actions remain in the action catalogue. A future telemetry-triggered
+MTD policy may also use them reactively; the initial comparison treats them as
+proactive controls.
+
+\subsection{Selected Defense Portfolio and Deployment Feasibility}
+\label{sec:portfolio}
+
+We select the initial portfolio by asking whether a control (i) can be represented
+with the present model or a small extension, (ii) has a plausible enforcement point
+in an isolated benchmark, (iii) can be rolled back and tested without disrupting
+production, and (iv) has an outcome measurable with current ABT metrics. This
+selection keeps MTD and adds a bounded host/network subset. Table~\ref{tab:portfolio}
+separates \emph{simulator feasibility} from \emph{deployment feasibility}; passing
+the former does not imply a production-ready controller.
+
+\begin{table}[t]
+\centering
+\small
+\setlength{\tabcolsep}{2pt}
+\caption{Selected initial portfolio and deferred alternatives. The prototype's
+action effects are simulator mutations; deployment requires separate adapters.}
+\label{tab:portfolio}
+\begin{tabular}{@{}p{0.19\columnwidth}p{0.12\columnwidth}p{0.31\columnwidth}p{0.28\columnwidth}@{}}
+\toprule
+Control & Choice & Model / testbed path & Caveat \\
+\midrule
+Proactive network segmentation & Select & Least-privilege rules over declared service and legitimate flows; Mininet/OVS target. & Add rule precedence, dry-run, read-back, and rollback. \\
+Reactive network flow block & Select & Block one attacker-relevant flow after a confirmed/injected alert; same OVS policy path. & Preserve recovery and legitimate flows; log every update. \\
+Proactive host patch / disable & Select for simulation & Existing actions; allowlisted Ansible tasks on disposable Linux hosts. & No generic CVE-to-package mapping or live patching. \\
+Reactive host quarantine & Select for simulation & Existing action; host-firewall/EDR profile is the deployment target. & Refine all-flow isolation to retain recovery access. \\
+MTD (diversity, shuffle) & Retain & Existing MTD actions remain a separate, proactive baseline. & Effects simulated; probabilities uncalibrated. \\
+DNS / NTA sensors & Defer & Requires resolver integration, domain state, and sensor events. & False positives and detection delay not modeled. \\
+ZTNA / rate limit / allowlist & Defer & Requires identity, traffic-load, or app-policy state. & Larger model and platform-specific validation. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For deployment planning, we target an isolated Linux testbed first, rather than
+claiming cross-platform or production support. Docker can provide reproducible
+containerized endpoints and service topologies, but its built-in network drivers
+alone do not provide an OpenFlow-controlled switch or SDN controller
+\cite{dockernetworking}. Docker is therefore suitable for endpoint and
+container-network adapter tests, not by itself for validating SDN flow-rule
+behaviour. For the SDN experiment, we select Mininet with Open vSwitch (OVS) and an
+OpenFlow controller: Mininet provides virtual hosts and switches for SDN
+experiments, while OVS supports programmable OpenFlow switching
+\cite{mininet,openvswitch}. Docker containers may optionally provide test services
+if attached through a Linux-host OVS integration; they are not required for the
+initial topology. The prototype's SDN controller remains an emulator until this
+adapter is implemented and validated.
+
+The network adapter would translate an approved abstract policy into testbed flow
+rules; host tasks would use restricted configuration-management playbooks. Each
+adapter must support dry-run, explicit approval, pre-change snapshot, post-change
+read-back, health checks, and rollback. We will run the testbed in an isolated
+Linux host or VM; Docker Desktop on macOS is not the target enforcement environment
+for kernel/OVS-level measurements. Windows hosts, heterogeneous production
+networks, direct autonomous actuation, and external DNS/IDS services are outside
+this initial deployment target. NIST firewall guidance and CISA incident response playbooks motivate policy review,
+containment, and recovery planning, not the assumption that ABT already implements
+those integrations~\cite{nist80041r1,cisairplaybook}. For a Linux firewall
+alternative, nftables supports atomic ruleset replacement; this is distinct from
+the selected OpenFlow/OVS experiment. Windows firewall deployment is possible
+through centrally managed Group Policy, but is outside the initial Linux-only
+target~\cite{nftablesatomic,windowsfirewallgpo}.
+
+The deployment path is staged: first validate endpoint services and the abstract
+policy adapter with containers; then validate dynamic flow installation, packet
+reachability, and policy-update effects in Mininet/OVS. Docker-only results will be
+reported as container-network tests, not as SDN results. Neither stage changes the
+current simulator's status or implies live deployment has already been completed.
+
+The experimental protocol separates two conditions: (1) \emph{proactive}, where
+the planner applies baseline segmentation and selected host hardening before the
+first attack round; and (2) \emph{reactive}, where a telemetry/attack-result event
+triggers a flow block and/or host quarantine followed by replanning. MTD remains
+available in both comparisons as its own action family; it is neither removed nor
+relabelled as a conventional firewall control. Report effect per mode and ablate
+proactive-only, reactive-only, MTD-only, non-MTD-only, and combined portfolios.
 
 \todo{Re-derive this table directly from the MTD-in-depth~\cite{mtdindepth2026}
 technique taxonomy rather than from our current assumption; extend with
@@ -304,8 +456,8 @@ For a candidate action set $A$ applied to a simulated copy of the network, ABT
 computes:
 \begin{align}
 \mathrm{risk}(A) &= \frac{\sum_{g\in G} v_{a(g)}\, P_A(g)}{\sum_{g\in G} v_{a(g)}} \\
-\mathrm{avail}(A) &= \frac{\sum_{a\in \mathrm{Assets}} v_a\cdot\mathrm{avail}_a(A)}{\sum_{a} v_a},\quad
-\mathrm{avail}_a(A)=\frac{\sum_{f\in L_a} w_f\cdot\mathbb{1}[f\ \text{works}]}{\sum_{f\in L_a} w_f}\\
+\mathrm{avail}(A) &= \frac{\sum_{a\in \mathrm{Assets}} v_a\cdot\mathrm{avail}_a(A)}{\sum_{a} v_a}\\
+\mathrm{avail}_a(A) &= \frac{\sum_{f\in L_a} w_f\cdot\mathbb{1}[f\ \text{works}]}{\sum_{f\in L_a} w_f}\\
 \mathrm{perf}(A) &= \frac{\sum_{a} v_a\cdot\big(1-o_a(A)\big)}{\sum_a v_a}\\
 \mathrm{cost}(A) &= \sum_{\alpha\in A} c_\alpha
 \end{align}
@@ -314,8 +466,11 @@ goal $g$, $L_a$ the legitimate flows touching asset $a$'s host, and $o_a(A)$ the
 cumulative performance overhead (from installed MIR agents, diversity, shuffling,
 and patch downtime) on $a$'s host. The overall utility is
 \begin{equation}
-U(A) = w_s\big(1-\mathrm{risk}(A)\big) + w_a\,\mathrm{avail}(A) + w_p\,\mathrm{perf}(A)
+\begin{aligned}
+U(A) ={}& w_s\big(1-\mathrm{risk}(A)\big) + w_a\,\mathrm{avail}(A)\\
+       &+ w_p\,\mathrm{perf}(A)
        - w_c\min\!\Big(1,\tfrac{\mathrm{cost}(A)}{B}\Big)
+\end{aligned}
 \label{eq:utility}
 \end{equation}
 subject to the hard constraints $\mathrm{avail}_a(A)\ge\alpha^{\min}_a$,
@@ -389,8 +544,12 @@ To test that the defence actually adapts to observed attacker behaviour rather t
 only to a static model, ABT supports a multi-round \emph{training/validation loop}
 against a red-team adapter (a thin interface implemented, in the reference tool, for
 Incalmo, APT-Agent and AutoHacker, and for a Monte-Carlo stand-in used for fast,
-offline validation). In round $t$: (1) the attacker attempts its goal(s) against the
-current network state, returning not only success/failure but the path of hosts it
+offline validation). The loop can optionally apply an initial proactive plan before
+the first attack; the current candidate-action catalogue supports host patching,
+service disabling, MIR installation, and the retained MTD actions, while the
+segmentation policy extension remains future work. In round $t$: (1) the attacker
+attempts its goal(s) against the current network state, returning not only
+success/failure but the path of hosts it
 traversed; (2) on success, each host on that path (excluding the goal host itself) is
 marked compromised with detection probability $p_{\mathrm{det}}$, modelling imperfect
 MIR detection, and reported to the master agent; (3) the master agent re-plans
@@ -441,6 +600,14 @@ the real Incalmo/APT-Agent tools rather than the Monte-Carlo stand-ins.}
 
 We propose to answer the following research questions on MHBench-generated
 Equifax-like, ICS, and enterprise topologies of increasing size (10--1000 hosts):
+the simulator is the current implementation baseline. A separate isolated Linux
+Mininet/OVS testbed is the planned environment for validating actual flow-rule
+enforcement; Docker is optional for hosting endpoints and is not treated as an
+OpenFlow datapath. Results from the two environments will be reported separately.
+In Mininet/OVS runs, record rule-installation and removal latency, packet loss,
+reachability of required and prohibited flows, and service latency/throughput before
+and after each policy update; Docker-only runs report container-network results and
+must not be presented as OpenFlow measurements.
 
 \begin{description}
 \item[RQ1 (effectiveness)] How much does ABT reduce goal-achievement probability
@@ -454,9 +621,10 @@ Equifax-like, ICS, and enterprise topologies of increasing size (10--1000 hosts)
   scale with network size?
 \item[RQ4 (adaptivity)] How many attack rounds (\S\ref{sec:loop}) does ABT need to
   converge to a low-risk configuration for each red-team tool, and what is the
-  residual risk at convergence? We will additionally ablate host-only vs.
-  network-only vs. combined actions, and simulation-guided vs. unguided (apply-first)
-  planning.
+  residual risk at convergence? Compare a proactive-only initial plan with
+  alert-triggered reactive re-planning, and ablate host-only, network-only, MTD-only,
+  non-MTD-only, and combined actions, as well as simulation-guided vs. unguided
+  (apply-first) planning.
 \end{description}
 
 \section{Discussion and Limitations}
@@ -494,6 +662,8 @@ loop and the full evaluation (\S\ref{sec:evaluation}) are implemented and run ag
 the real red-team tools.}
 
 \bibliographystyle{IEEEtran}
+{\sloppy
 \bibliography{refs}
+}
 
 \end{document}
