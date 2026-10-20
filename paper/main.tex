@@ -396,9 +396,11 @@ marked compromised with detection probability $p_{\mathrm{det}}$, modelling impe
 MIR detection, and reported to the master agent; (3) the master agent re-plans
 (Algorithm~\ref{alg:planner}) using the updated, partially-compromised world model and
 executes the resulting actions; (4) risk, availability, performance and the
-attacker's realised success rate are logged for round $t$. Repeating this for $T$
-rounds lets us measure both the \emph{convergence rate} (how many rounds until risk
-drops below a threshold) and the \emph{residual risk} after convergence, separately
+attacker's per-round and cumulative realised success rates are logged for round $t$.
+The reference implementation stops early after a configurable number of consecutive
+rounds with neither newly detected hosts nor defence actions. Repeating this for $T$
+rounds lets us measure both the \emph{convergence rate} (how many rounds until the
+defence state stabilises) and the \emph{residual risk} after convergence, separately
 for each red-team tool, which we propose as the core quantitative result of the full
 paper (\S\ref{sec:evaluation}).
 

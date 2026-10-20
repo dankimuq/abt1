@@ -41,15 +41,36 @@ For a defence plan *A* applied to a **simulated copy** of the network:
 
 Planner: greedy marginal-utility selection (anytime, polynomial). Alternatives for the paper: beam search, ILP/MCTS, RL; compare against optimal on small networks.
 
-## 3. Mapping asset → defence (kill-chain, per the MTD-in-depth paper)
+## 3. Attack-and-defence training loop
+
+`abt.loop.TrainingLoop` runs repeated rounds against a `RedTeamAdapter`. Each round
+records the attacker result and path, samples MIR detections for traversed hosts
+(excluding the goal host), replans, executes the selected model actions, and stores
+before/after evaluations. The loop stops early after a configurable number of
+rounds with no newly detected hosts or defence actions.
+
+```python
+from abt.loop import TrainingLoop
+from abt.master import MasterAgent
+from abt.red import APTAgentAdapter
+from examples.enterprise import build
+
+net, goals = build()
+result = TrainingLoop(
+    MasterAgent(net, goals), APTAgentAdapter(goals), detect_p=0.6, seed=1
+).run(rounds=20)
+print(result.success_rate, result.converged)
+```
+
+## 4. Mapping asset → defence (kill-chain, per the MTD-in-depth paper)
 
 Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver, exploit, install, c2, objective). Current tags: IP shuffle→recon, diversity→weaponize, patch/MIR/disable→exploit, flow blocking/isolation→c2. **Please verify and refine this table against the paper's actual technique taxonomy**, then extend the catalogue (e.g., credential rotation, decoys, data encryption for the objective phase), and let the master prefer plans covering multiple phases for crown-jewel assets.
 
-## 4. Red-team integration
+## 5. Red-team integration
 
 `abt/red.py` defines `RedTeamAdapter`. The shipped adapters (Incalmo, APT-Agent, AutoHacker) are Monte-Carlo stand-ins with different persistence levels, so the pipeline is testable without a live range. For the paper, replace them with real runs in a testbed (e.g., Incalmo's range environment): translate each tool's goal into `AttackGoal` and its observed behaviour into MIR events.
 
-## 5. Suggested paper structure
+## 6. Suggested paper structure
 
 1. Introduction – LLM-driven attackers (Incalmo, APT-Agent) outpace manual defence.
 2. Background – HARM (HARMer), security models/metrics (Enoch 2021), MTD-in-depth.
@@ -58,7 +79,7 @@ Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver
 5. Evaluation – RQ1: reduction in goal success vs. each attacker; RQ2: legit-user availability/performance cost; RQ3: planner optimality/scalability (hosts 10–1000); RQ4: reaction time to MIR alerts; ablations (host-only vs. network-only vs. both; with/without simulation).
 6. Discussion – model fidelity, adaptive attackers, false positives, safety of autonomous response (human approval gate).
 
-## 6. Known limitations / next steps
+## 7. Known limitations / next steps
 
 - Probabilities (MIR block 0.6, diversity 0.7, shuffle 0.6) are placeholders; calibrate with testbed data.
 - Paths assume independence (noisy-OR over paths overestimates correlated paths).
@@ -66,9 +87,9 @@ Each `Action.phase` is tagged with a kill-chain phase (recon, weaponize, deliver
 - Network controller is a model mutation; add backends (iptables/SDN/cloud security groups).
 - Attacker adaptation (re-planning after defence changes) is only approximated via `persistence`.
 
-## 7. Run
+## 8. Run
 
 ```
 python3 examples/run_demo.py
-python3 -c "import tests.test_abt as t; [getattr(t,n)() for n in dir(t) if n.startswith('test_')]"
+python3 -c 'import runpy; files=["tests/test_abt.py", "tests/test_importers.py", "tests/test_loop.py"]; [fn() for path in files for name, fn in runpy.run_path(path).items() if name.startswith("test_") and callable(fn)]'
 ```

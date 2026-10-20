@@ -1,12 +1,14 @@
 """Master agent: network-wide monitoring, planning, simulation and recommendation."""
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .actions import Action, candidate_actions
 from .harm import attack_paths
 from .model import AttackGoal, Network
+from .red import ATTACKER, AttackResult
 from .simulator import Evaluation, Weights, evaluate
 
 
@@ -27,6 +29,30 @@ class MasterAgent:
         self.mir_events.append(event)
         if event.get("type") == "compromise":
             self.net.compromised.add(event["host"])
+
+    def observe(
+        self,
+        result: AttackResult,
+        detect_p: float = 0.6,
+        rng: Optional[random.Random] = None,
+    ) -> List[str]:
+        if not 0.0 <= detect_p <= 1.0:
+            raise ValueError("detect_p must be between 0 and 1")
+        if not result.success:
+            return []
+
+        rng = rng or random.Random()
+        goal_host = result.goal.host if result.goal else None
+        detected = []
+        for host in result.path:
+            if host in (ATTACKER, goal_host):
+                continue
+            if host not in self.net.hosts:
+                raise ValueError(f"attack path contains unknown host: {host}")
+            if host not in self.net.compromised and rng.random() < detect_p:
+                self.ingest({"type": "compromise", "host": host})
+                detected.append(host)
+        return detected
 
     def attack_surface(self):
         return {g.host: attack_paths(self.net, g)[:5] for g in self.goals}

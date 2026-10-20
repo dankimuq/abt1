@@ -45,5 +45,5 @@ Overleaf를 쓴다면 `paper/` 폴더 전체(또는 `main.tex`, `refs.bib`,
 | §IV-E (Goal capture) | `abt/model.py: AttackGoal` |
 | §IV-F/§V (마스터 에이전트, Utility) | `abt/master.py`, `abt/simulator.py` |
 | §VI (Network Integration) | `abt/importers.py` — **아직 미구현, 다음 작업 항목** |
-| §VII (Closing the Loop) | `abt/loop.py`, `MasterAgent.observe` — **아직 미구현, 다음 작업 항목** |
+| §VII (Closing the Loop) | `abt/loop.py` (`TrainingLoop`), `MasterAgent.observe` |
 | §VIII (Worked Example) | `examples/enterprise.py`, `examples/run_demo.py` |

@@ -8,10 +8,21 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
-from typing import List
+from dataclasses import dataclass
+from typing import List, Optional
 
 from .harm import ATTACKER, attack_paths
 from .model import AttackGoal, Network
+
+
+@dataclass
+class AttackResult:
+    success: bool
+    path: List[str]
+    goal: Optional[AttackGoal]
+
+    def __bool__(self) -> bool:
+        return self.success
 
 
 class RedTeamAdapter(ABC):
@@ -21,8 +32,8 @@ class RedTeamAdapter(ABC):
     def goals(self) -> List[AttackGoal]: ...
 
     @abstractmethod
-    def run(self, net: Network, rng: random.Random) -> bool:
-        """Attempt the goals against net; return True if any goal achieved."""
+    def run(self, net: Network, rng: random.Random) -> AttackResult:
+        """Attempt goals against net and report the result and successful path."""
 
 
 class SimulatedAttacker(RedTeamAdapter):
@@ -39,8 +50,8 @@ class SimulatedAttacker(RedTeamAdapter):
         for g in self._goals:
             for path in attack_paths(net, g)[: self.persistence]:
                 if rng.random() < path.asp:
-                    return True
-        return False
+                    return AttackResult(True, path.hosts, g)
+        return AttackResult(False, [], None)
 
 
 # Placeholders documenting where the real tools plug in.
@@ -61,4 +72,4 @@ class AutoHackerAdapter(SimulatedAttacker):
 
 def success_rate(net: Network, attacker: RedTeamAdapter, trials: int = 2000, seed: int = 1) -> float:
     rng = random.Random(seed)
-    return sum(attacker.run(net, rng) for _ in range(trials)) / trials
+    return sum(bool(attacker.run(net, rng)) for _ in range(trials)) / trials

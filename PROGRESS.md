@@ -69,11 +69,10 @@
     - **APT-Agent 토폴로지**: host/edge(JSON) 그대로 `Host/Service/Vuln`+flow로 매핑, `src=="attacker"`인 edge의 목적지를 entry point로, CVSS/10을 공격성공확률 p로 사용(검증 필요, `\todo` 표시됨), 단일 goal host를 `AttackGoal`로 변환.
     - `load_network(path)`: 최상위 키(`hosts`+`edges` vs `networks`)로 스키마 자동 판별.
   - **검증**: 실제 두 저장소 파일을 복사하지 않고, 동일 스키마의 축소 합성 JSON(2~3 호스트)을 직접 만들어 `load_mhbench`/`load_apt_agent_topology`/`load_network`를 호출 → 호스트·진입점·flow·`attack_paths`/`goal_probability`가 기대대로 계산됨을 확인(세션 로그 기준, 아직 `tests/`에 정식 테스트로 추가되지 않음).
-- **③ 공격-학습 루프**: 아직 미구현. 다음 항목 남음:
-  - `abt/red.py` 확장: `RedTeamAdapter.run()`이 `bool` 대신 `AttackResult(success, path, goal)`를 반환하도록 변경(하위 호환 유지 검토).
-  - `abt/master.py`: `MasterAgent.observe(result, detect_p=...)` 추가 — 공격 성공 시 일정 확률로 경유 호스트를 "탐지됨"으로 반영 후 재계획.
-  - `abt/loop.py`: `TrainingLoop` — N 라운드 반복, 라운드별 risk/success 로그, 수렴 확인.
-  - `tests/test_importers.py`, `tests/test_loop.py`: 합성 MHBench/APT-Agent 픽스처 + 다라운드 루프를 정식 테스트로 고정.
-  - (선택) CLI: `python -m abt.cli --network <file> --rounds N`.
+- **③ 공격-학습 루프 — 기본 구현 완료.**
+  - `RedTeamAdapter.run()`은 경로와 목표를 포함한 `AttackResult`를 반환하며, 결과의 truthiness와 `TrainingLoop`의 bool 정규화로 이전 호출 패턴을 유지.
+  - `MasterAgent.observe()`는 공격 성공 경로의 중간 호스트를 독립 확률로 탐지해 compromise 이벤트로 반영하고, 목표 호스트는 탐지 대상에서 제외.
+  - `abt/loop.py`의 `TrainingLoop`는 공격 → 관측 → 재계획/실행을 반복하며 라운드별 평가, 누적 공격 성공률을 기록하고 방어 상태가 안정되면 조기 종료.
+  - `tests/test_importers.py`와 `tests/test_loop.py`에서 가져오기 및 반복 루프를 테스트함. CLI는 아직 구현하지 않음.
 
 > 주의: 두 저장소(JSON 파일) 자체를 리포지토리에 복사하지 않고, **스키마와 로직만 참고해서 우리 코드로 새로 작성**했습니다. 테스트용 픽스처도 실제 저장소 파일을 복사하지 않고 동일 스키마의 축소판을 직접 작성합니다.
